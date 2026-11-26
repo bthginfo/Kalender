@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["fra1"],
+  "functions": {
+    "app/api/cron/sync/route.ts": {
+      "experimentalTriggers": [{ "type": "schedule/v1beta" }],
+      "maxDuration": 300
+    }
+  },
+  "schedules": {
+    "sync-sources": {
+      "schedule": "*/30 6-23 * * *",
+      "timezone": "Europe/Berlin",
+      "function": "api/cron/sync"
+    }
+  }
+}
