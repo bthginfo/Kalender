@@ -29,7 +29,20 @@ export async function createSession(name: string): Promise<string> {
   return `${payload}.${b64url(sig)}`;
 }
 
-export async function verifySession(token: string | undefined | null): Promise<{ n: string } | null> {
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+  maxAge: SESSION_DAYS * 86400,
+};
+
+/** Sitzung verlängern, wenn sie älter als einen Tag ist → wer die App nutzt, bleibt dauerhaft angemeldet */
+export function shouldRenew(session: { exp: number }): boolean {
+  return session.exp - Date.now() < (SESSION_DAYS - 1) * 86400000;
+}
+
+export async function verifySession(token: string | undefined | null): Promise<{ n: string; exp: number } | null> {
   if (!token) return null;
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
@@ -41,7 +54,7 @@ export async function verifySession(token: string | undefined | null): Promise<{
     if (diff !== 0) return null;
     const data = JSON.parse(b64urlDecode(payload)) as { n: string; exp: number };
     if (!data.exp || data.exp < Date.now()) return null;
-    return { n: data.n };
+    return { n: data.n, exp: data.exp };
   } catch {
     return null;
   }

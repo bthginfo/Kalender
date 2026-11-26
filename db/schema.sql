@@ -86,3 +86,10 @@ create table if not exists settings (
   value jsonb not null
 );
 alter table calendars add column if not exists visible boolean not null default true;
+
+-- Fehlgeschlagene Anmeldungen (Schutz gegen Durchprobieren des Passworts)
+create table if not exists login_attempts (
+  ip  text not null,
+  at  timestamptz not null default now()
+);
+create index if not exists login_attempts_ip_idx on login_attempts (ip, at desc);
