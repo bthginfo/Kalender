@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { db, newId } from "../db";
-import { addDays } from "../date";
+import { addDays, todayBerlin } from "../date";
 import type { EventStatus, SourcePayload } from "../types";
 import { AUTO_MERGE, REVIEW, detectKind, scoreMatch, type Kind, type Matchable } from "./match";
 
@@ -37,6 +37,11 @@ export type SourceResult = {
   windowStart: string; // YYYY-MM-DD
   windowEnd: string;
   note?: string;
+  /**
+   * Verschwindet ein Eintrag (z. B. Anfrage abgelehnt, Hochzeit abgesagt), auch einen damit
+   * zusammengeführten Kalender.digital-Termin entfernen – nur für heute und die Zukunft.
+   */
+  removeLinkedEvents?: (sourceId: string) => boolean;
 };
 
 export type SyncStats = {
@@ -50,6 +55,7 @@ export type SyncStats = {
   ok: boolean;
   message?: string;
 };
+
 
 type Row = Record<string, unknown>;
 type Q = import("@neondatabase/serverless").NeonQueryPromise<false, false, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -87,7 +93,8 @@ const RESTORE_FROM_ORIGIN = `update events e set
 
 type WindowEvent = Matchable & { id: string; sources: Set<string> };
 
-export async function applySource(source: string, result: SourceResult, dedupe = true): Promise<SyncStats> {
+/** dryRun: nur berechnen, was passieren würde (für Tests), nichts schreiben */
+export async function applySource(source: string, result: SourceResult, dedupe = true, dryRun = false): Promise<SyncStats & { plan?: unknown[] }> {
   const sql = db();
   const stats: SyncStats = { source, fetched: result.items.length, created: 0, updated: 0, matched: 0, review: 0, removed: 0, ok: true, message: result.note };
   const items = [...result.items].sort((a, b) => a.start.localeCompare(b.start));
@@ -213,6 +220,16 @@ export async function applySource(source: string, result: SourceResult, dedupe =
     fresh.push({ item, hash });
   }
 
+  // --- Einträge dieser Quelle, die es nicht mehr gibt (z. B. Anfrage → zur Braut umgewandelt):
+  // ihr Termin darf von einem neuen Eintrag derselben Quelle übernommen werden statt doppelt zu erscheinen
+  const stillLinked = new Set<string>();
+  for (const [sid, l] of links) if (seen.has(sid)) stillLinked.add(String(l.event_id));
+  const vanishing = new Set<string>();
+  for (const [sid, l] of links) if (!seen.has(sid) && !stillLinked.has(String(l.event_id))) vanishing.add(String(l.event_id));
+  for (const ev of windowEvents) if (vanishing.has(ev.id)) ev.sources.delete(source);
+  const newlyLinked = new Set<string>();
+  const debug: unknown[] = [];
+
   // --- Neue Einträge: alle Kandidaten-Paare bewerten und global nach Punktzahl zuordnen
   // (sonst "stiehlt" ein früher Eintrag wie "Tagesdienst" den Termin, der eigentlich zur Vorstellung gehört)
   type Pair = { i: number; ev: WindowEvent; score: number; reason: string };
@@ -232,6 +249,8 @@ export async function applySource(source: string, result: SourceResult, dedupe =
     if (p.score < AUTO_MERGE || assigned.has(p.i) || (p.ev.sources.has(source) && !multiLink(fresh[p.i].item))) continue;
     assigned.set(p.i, p);
     p.ev.sources.add(source);
+    newlyLinked.add(p.ev.id);
+    debug.push({ type: "match", sourceId: fresh[p.i].item.sourceId, eventId: p.ev.id, title: p.ev.title, score: p.score, reason: p.reason });
   }
   const reviewPair = new Map<number, Pair>();
   for (const p of pairs) {
@@ -288,26 +307,71 @@ export async function applySource(source: string, result: SourceResult, dedupe =
     stats.created++;
   });
 
-  // --- In der Quelle verschwundene Einträge
+  // --- In der Quelle verschwundene Einträge (abgelehnt, abgesagt, gelöscht, umgewandelt …)
   if (result.complete) {
-    for (const [sourceId, link] of links) {
-      if (seen.has(sourceId)) continue;
-      const day = String(link.day);
-      if (day < result.windowStart || day > result.windowEnd) continue;
+    const missing = [...links].filter(([sid, l]) => {
+      if (seen.has(sid)) return false;
+      const day = String(l.day);
+      return day >= result.windowStart && day <= result.windowEnd;
+    });
+
+    // Mit welchen anderen Quellen sind die betroffenen Termine noch verknüpft?
+    const otherSources = new Map<string, string[]>();
+    if (missing.length) {
+      const rows = (await sql.query(
+        `select event_id, array_agg(source) as sources from event_links
+         where event_id = any($1) and source <> $2 group by event_id`,
+        [missing.map(([, l]) => String(l.event_id)), source],
+      )) as Row[];
+      for (const r of rows) otherSources.set(String(r.event_id), (r.sources as string[]) ?? []);
+    }
+
+    const today = todayBerlin();
+    type Action = "delete" | "restore" | "unlink";
+    const plan: { sourceId: string; eventId: string; action: Action }[] = [];
+    for (const [sourceId, link] of missing) {
       const eventId = String(link.event_id);
-      if (link.match_type === "created" && !link.locally_modified && !link.deleted_at && !superseded.has(eventId)) {
-        writes.push(sql.query(
-          `update events set deleted_at = now(), updated_at = now(), extra = extra || '{"removedBySource": true}'::jsonb where id = $1`,
-          [eventId],
-        ));
+      const editable = !link.locally_modified && !link.deleted_at;
+      let action: Action = "unlink";
+      if (newlyLinked.has(eventId)) {
+        action = "unlink"; // von einem neuen Eintrag übernommen (z. B. Anfrage → Braut)
+      } else if (link.match_type === "created" && editable && !superseded.has(eventId)) {
+        action = "delete";
+      } else if (
+        result.removeLinkedEvents?.(sourceId) && editable && String(link.day) >= today &&
+        !(otherSources.get(eventId) ?? []).some((s) => s !== "kalenderdigital")
+      ) {
+        // Website: abgelehnt/abgesagt → auch den zusammengeführten Kalender.digital-Eintrag entfernen
+        action = "delete";
       } else if (link.authoritative && link.match_type !== "created" && !link.deleted_at) {
-        writes.push(sql.query(RESTORE_FROM_ORIGIN, [eventId, source]));
+        action = "restore";
       }
-      writes.push(sql.query("delete from event_links where source=$1 and source_id=$2", [source, sourceId]));
-      stats.removed++;
+      plan.push({ sourceId, eventId, action });
+    }
+    debug.push(...plan.map((p) => ({ type: "missing", ...p })));
+
+    // Sicherheitsbremse: verdächtig viele Löschungen auf einmal → nichts anfassen
+    const deletions = plan.filter((p) => p.action === "delete").length;
+    if (deletions > Math.max(15, Math.round(links.size * 0.3))) {
+      stats.ok = false;
+      stats.message = `${stats.message ? stats.message + " · " : ""}Sicherheitsstopp: ${deletions} Termine wären auf einmal gelöscht worden – nichts entfernt`;
+    } else {
+      for (const p of plan) {
+        if (p.action === "delete") {
+          writes.push(sql.query(
+            `update events set deleted_at = now(), updated_at = now(), extra = extra || '{"removedBySource": true}'::jsonb where id = $1`,
+            [p.eventId],
+          ));
+        } else if (p.action === "restore") {
+          writes.push(sql.query(RESTORE_FROM_ORIGIN, [p.eventId, source]));
+        }
+        writes.push(sql.query("delete from event_links where source=$1 and source_id=$2", [source, p.sourceId]));
+        stats.removed++;
+      }
     }
   }
 
+  if (dryRun) return { ...stats, plan: debug };
   for (let i = 0; i < writes.length; i += 80) {
     await sql.transaction(writes.slice(i, i + 80));
   }

@@ -20,7 +20,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 export default function YearView({ focus, today, byDay, calById, onPickMonth, onVisibleYear }: Props) {
   const thisYear = Number(today.slice(0, 4));
   const [first, setFirst] = useState(() => Math.min(focus.year, thisYear) - 1);
-  const [last, setLast] = useState(() => Math.max(focus.year, thisYear) + 3);
+  const [last, setLast] = useState(() => Math.max(focus.year, thisYear) + 6);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sections = useRef(new Map<number, HTMLElement>());
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -54,8 +54,8 @@ export default function YearView({ focus, today, byDay, calById, onPickMonth, on
     const el = bottomRef.current;
     if (!el) return;
     const io = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) setLast((l) => l + 3);
-    }, { root: scrollRef.current, rootMargin: "600px" });
+      if (entry.isIntersecting) setLast((l) => l + 5);
+    }, { root: scrollRef.current, rootMargin: "2500px" });
     io.observe(el);
     return () => io.disconnect();
   }, []);
@@ -64,7 +64,7 @@ export default function YearView({ focus, today, byDay, calById, onPickMonth, on
     const box = scrollRef.current;
     if (!box) return;
     // Kurz vor dem Ende weitere Jahre anhängen
-    if (box.scrollTop + box.clientHeight > box.scrollHeight - 1200) setLast((l) => Math.max(l, years[years.length - 1] + 3));
+    if (box.scrollTop + box.clientHeight > box.scrollHeight - 3000) setLast((l) => Math.max(l, years[years.length - 1] + 5));
     let current = first;
     for (const [y, el] of sections.current) {
       if (el.offsetTop - 60 <= box.scrollTop && y > current) current = y;

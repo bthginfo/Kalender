@@ -312,6 +312,9 @@ export async function fetchWebsite(): Promise<SourceResult> {
   for (const e of ownEvents) {
     const day = String(e.date);
     const cat = String(e.category_name ?? "");
+    // Die Website legt beim Löschen einer Braut eine "Archivierte …"-Kopie an. Liegt die in der Zukunft,
+    // wurde die Hochzeit abgesagt → nicht anzeigen (der alte Termin wird dann entfernt).
+    if (/^Archiviert/.test(cat) && day >= today) continue;
     const start = `${day}T${String(e.start_time || "09:00").slice(0, 5)}`;
     let end = `${day}T${String(e.end_time || "10:00").slice(0, 5)}`;
     if (end <= start) end = addMinutes(start, 60);
@@ -472,5 +475,13 @@ export async function fetchWebsite(): Promise<SourceResult> {
     });
   }
 
-  return { items, complete: true, windowStart, windowEnd, note: `Quelle: ${active.label} (${reason})` };
+  return {
+    items, complete: true, windowStart, windowEnd, note: `Quelle: ${active.label} (${reason})`,
+    // Abgelehnte Anfragen/Angebote, abgesagte Hochzeiten & gelöschte Termine verschwinden auch aus dem Kalender –
+    // geblockte Tage, Fristen und Zahlungen sind nur Markierungen und entfernen keine anderen Termine
+    removeLinkedEvents: (sourceId) =>
+      /^(bride_inquiries|academy_bookings|lena_calendar_events):/.test(sourceId) ||
+      /^offers:.+:event$/.test(sourceId) ||
+      /^brides:.+:(wedding|wedding2|probe)$/.test(sourceId),
+  };
 }
