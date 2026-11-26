@@ -277,6 +277,18 @@ export async function splitLink(eventId: string, source: string, sourceId: strin
        on conflict (a_id,b_id) do update set status='dismissed'`,
       [eventId, id],
     ),
+    // Hatte die getrennte Quelle Titel/Zeit vorgegeben, bekommt der ursprüngliche Termin seine eigenen Daten zurück
+    sql.query(
+      `update events e set
+         title = coalesce(nullif(l.payload->>'title', ''), e.title),
+         start_at = coalesce((l.payload->>'start')::timestamp, e.start_at),
+         end_at = coalesce((l.payload->>'end')::timestamp, e.end_at),
+         all_day = coalesce((l.payload->>'allDay')::boolean, e.all_day),
+         updated_at = now()
+       from event_links l
+       where $3::boolean and e.id = $1 and l.event_id = e.id and l.match_type = 'created' and l.source <> $2`,
+      [eventId, source, Boolean(link.authoritative)],
+    ),
   ]);
   return getEvent(id);
 }

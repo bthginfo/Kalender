@@ -22,6 +22,12 @@ export type ExternalItem = {
   calendar: { name: string; color: string; sourceKey?: string; hidden?: boolean };
   url: string | null;
   payload: SourcePayload;
+  /**
+   * Maßgebliche Quelle: Titel, Uhrzeit, Ort und Status dieses Eintrags gewinnen gegenüber
+   * dem zusammengeführten Kalender.digital-Termin (Theaterdienste aus DigitalMask,
+   * Hochzeiten/Probetermine/Kundinnen aus der Website – dort stimmen die Uhrzeiten).
+   */
+  authoritative?: boolean;
 };
 
 export type SourceResult = {
@@ -48,9 +54,36 @@ export type SyncStats = {
 type Row = Record<string, unknown>;
 type Q = import("@neondatabase/serverless").NeonQueryPromise<false, false, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-const multiLink = (item: ExternalItem) => item.kind === "theater" || Boolean(item.calendar.hidden);
+/** Mehrere Einträge einer Quelle dürfen nur bei Verfügbarkeits-Markern auf denselben Termin zeigen */
+const multiLink = (item: ExternalItem) => !item.authoritative && Boolean(item.calendar.hidden);
 
 const hashOf = (v: unknown) => createHash("sha1").update(JSON.stringify(v)).digest("hex");
+
+/**
+ * Maßgebliche Daten übernehmen. Ausnahme: Hat die Quelle nur ein Datum (ganztägig), der Termin aber
+ * eine Uhrzeit, bleibt die Uhrzeit erhalten. Lenas Notizen bleiben stehen.
+ */
+const AUTH_UPDATE = `update events set
+    title = $2,
+    start_at = case when $5::boolean and not all_day then start_at else $3::timestamp end,
+    end_at = case when $5::boolean and not all_day then end_at else $4::timestamp end,
+    all_day = case when $5::boolean and not all_day then all_day else $5::boolean end,
+    status = $6,
+    location = case when $7 <> '' then $7 else location end,
+    who = case when $8 <> '' then $8 else who end,
+    notes = case when notes = '' then $9 else notes end,
+    updated_at = now()
+  where id = $1 and not locally_modified`;
+
+/** Fällt die maßgebliche Quelle weg, bekommt der Termin wieder die Daten seines Ursprungs (z. B. Kalender.digital) */
+const RESTORE_FROM_ORIGIN = `update events e set
+    title = coalesce(nullif(l.payload->>'title', ''), e.title),
+    start_at = coalesce((l.payload->>'start')::timestamp, e.start_at),
+    end_at = coalesce((l.payload->>'end')::timestamp, e.end_at),
+    all_day = coalesce((l.payload->>'allDay')::boolean, e.all_day),
+    updated_at = now()
+  from event_links l
+  where e.id = $1 and l.event_id = e.id and l.match_type = 'created' and l.source <> $2 and not e.locally_modified`;
 
 type WindowEvent = Matchable & { id: string; sources: Set<string> };
 
@@ -61,12 +94,19 @@ export async function applySource(source: string, result: SourceResult, dedupe =
 
   // --- bestehende Verknüpfungen dieser Quelle
   const linkRows = (await sql.query(
-    `select l.source_id, l.event_id, l.hash, l.match_type, e.locally_modified, e.deleted_at,
+    `select l.source_id, l.event_id, l.hash, l.match_type, l.authoritative, e.locally_modified, e.deleted_at,
             to_char(e.start_at, 'YYYY-MM-DD') as day
      from event_links l join events e on e.id = l.event_id where l.source = $1`,
     [source],
   )) as Row[];
   const links = new Map(linkRows.map((r) => [String(r.source_id), r]));
+
+  // Termine, deren Daten eine andere, maßgebliche Quelle bestimmt (z. B. DigitalMask für Theater)
+  const supersededRows = (await sql.query(
+    "select distinct event_id from event_links where authoritative and source <> $1",
+    [source],
+  )) as Row[];
+  const superseded = new Set(supersededRows.map((r) => String(r.event_id)));
 
   // --- Kalender
   const calRows = (await sql.query("select id, name, color, source_key from calendars")) as Row[];
@@ -79,10 +119,7 @@ export async function applySource(source: string, result: SourceResult, dedupe =
 
   function calendarFor(item: ExternalItem): string {
     const { name, color, sourceKey, hidden } = item.calendar;
-    if (sourceKey && calByKey.has(sourceKey)) {
-      const id = calByKey.get(sourceKey)!;
-      return id;
-    }
+    if (sourceKey && calByKey.has(sourceKey)) return calByKey.get(sourceKey)!;
     const byName = calByName.get(name.toLowerCase());
     if (byName) {
       if (sourceKey) {
@@ -102,6 +139,9 @@ export async function applySource(source: string, result: SourceResult, dedupe =
     if (sourceKey) calByKey.set(sourceKey, id);
     return id;
   }
+
+  const authUpdate = (eventId: string, item: ExternalItem) =>
+    sql.query(AUTH_UPDATE, [eventId, item.title, item.start, item.end, item.allDay, item.status, item.location, item.who, item.notes]);
 
   // --- Kandidaten im Zeitfenster
   let windowEvents: WindowEvent[] = [];
@@ -139,7 +179,8 @@ export async function applySource(source: string, result: SourceResult, dedupe =
   for (const item of items) {
     if (seen.has(item.sourceId)) continue;
     seen.add(item.sourceId);
-    const hash = hashOf([item.title, item.notes, item.who, item.location, item.start, item.end, item.allDay, item.status, item.payload, item.url]);
+    const auth = Boolean(item.authoritative);
+    const hash = hashOf([item.title, item.notes, item.who, item.location, item.start, item.end, item.allDay, item.status, item.payload, item.url, auth]);
     const link = links.get(item.sourceId);
 
     if (link) {
@@ -147,18 +188,23 @@ export async function applySource(source: string, result: SourceResult, dedupe =
         writes.push(sql.query("update event_links set last_seen_at = now() where source=$1 and source_id=$2", [source, item.sourceId]));
         continue;
       }
+      const eventId = String(link.event_id);
       writes.push(sql.query(
-        "update event_links set hash=$3, url=$4, payload=$5::jsonb, last_seen_at=now() where source=$1 and source_id=$2",
-        [source, item.sourceId, hash, item.url, JSON.stringify(item.payload)],
+        "update event_links set hash=$3, url=$4, payload=$5::jsonb, authoritative=$6, last_seen_at=now() where source=$1 and source_id=$2",
+        [source, item.sourceId, hash, item.url, JSON.stringify(item.payload), auth],
       ));
-      if (!link.deleted_at && link.match_type === "created" && !link.locally_modified) {
+      if (link.deleted_at) {
+        // von Lena gelöscht → bleibt gelöscht
+      } else if (link.match_type === "created" && !link.locally_modified && !superseded.has(eventId)) {
         writes.push(sql.query(
           `update events set title=$2, notes=$3, who=$4, location=$5, start_at=$6, end_at=$7, all_day=$8, status=$9, updated_at=now()
            where id=$1`,
-          [link.event_id, item.title, item.notes, item.who, item.location, item.start, item.end, item.allDay, item.status],
+          [eventId, item.title, item.notes, item.who, item.location, item.start, item.end, item.allDay, item.status],
         ));
-      } else if (!link.deleted_at) {
-        writes.push(sql.query("update events set updated_at=now() where id=$1", [link.event_id]));
+      } else if (auth && !link.locally_modified) {
+        writes.push(authUpdate(eventId, item));
+      } else {
+        writes.push(sql.query("update events set updated_at=now() where id=$1", [eventId]));
       }
       stats.updated++;
       continue;
@@ -174,8 +220,7 @@ export async function applySource(source: string, result: SourceResult, dedupe =
   if (dedupe) {
     fresh.forEach(({ item }, i) => {
       for (const ev of windowEvents) {
-        // pro Termin nur ein Eintrag je Quelle – außer bei Theaterdiensten (Tagesdienst + Vorstellung = ein Eintrag bei Lena) und Verfügbarkeits-Markern
-        if (ev.sources.has(source) && !multiLink(item)) continue;
+        if (ev.sources.has(source) && !multiLink(item)) continue; // pro Termin nur ein Eintrag je Quelle
         const m = scoreMatch(item, ev);
         if (m.score >= REVIEW) pairs.push({ i, ev, score: m.score, reason: m.reason });
       }
@@ -189,23 +234,33 @@ export async function applySource(source: string, result: SourceResult, dedupe =
     p.ev.sources.add(source);
   }
   const reviewPair = new Map<number, Pair>();
-  for (const p of pairs) if (!assigned.has(p.i) && !reviewPair.has(p.i)) reviewPair.set(p.i, p);
+  for (const p of pairs) {
+    if (assigned.has(p.i) || reviewPair.has(p.i)) continue;
+    if (p.ev.sources.has(source) && !multiLink(fresh[p.i].item)) continue; // schon mit einem Eintrag dieser Quelle verknüpft
+    reviewPair.set(p.i, p);
+  }
 
   fresh.forEach(({ item, hash }, i) => {
+    const auth = Boolean(item.authoritative);
     const match = assigned.get(i);
     if (match) {
       writes.push(sql.query(
-        `insert into event_links (source, source_id, event_id, hash, url, match_type, match_score, match_reason, payload)
-         values ($1,$2,$3,$4,$5,'matched',$6,$7,$8::jsonb) on conflict (source, source_id) do nothing`,
-        [source, item.sourceId, match.ev.id, hash, item.url, match.score, match.reason, JSON.stringify(item.payload)],
+        `insert into event_links (source, source_id, event_id, hash, url, match_type, match_score, match_reason, payload, authoritative)
+         values ($1,$2,$3,$4,$5,'matched',$6,$7,$8::jsonb,$9) on conflict (source, source_id) do nothing`,
+        [source, item.sourceId, match.ev.id, hash, item.url, match.score, match.reason, JSON.stringify(item.payload), auth],
       ));
-      // Leere Felder ergänzen – nichts überschreiben, was Lena selbst eingetragen hat
-      writes.push(sql.query(
-        `update events set who = case when who = '' then $2 else who end,
-           location = case when location = '' then $3 else location end,
-           title = case when title in ('', '(ohne Titel)') then $4 else title end, updated_at = now() where id = $1`,
-        [match.ev.id, item.who, item.location, item.title],
-      ));
+      if (auth) {
+        // Maßgebliche Quelle: Titel, Uhrzeit, Ort, Status übernehmen
+        writes.push(authUpdate(match.ev.id, item));
+      } else {
+        // Nur leere Felder ergänzen – nichts überschreiben, was Lena selbst eingetragen hat
+        writes.push(sql.query(
+          `update events set who = case when who = '' then $2 else who end,
+             location = case when location = '' then $3 else location end,
+             title = case when title in ('', '(ohne Titel)') then $4 else title end, updated_at = now() where id = $1`,
+          [match.ev.id, item.who, item.location, item.title],
+        ));
+      }
       stats.matched++;
       return;
     }
@@ -218,9 +273,9 @@ export async function applySource(source: string, result: SourceResult, dedupe =
       [id, calendarId, item.title, item.notes, item.who, item.location, item.start, item.end, item.allDay, item.status, source],
     ));
     writes.push(sql.query(
-      `insert into event_links (source, source_id, event_id, hash, url, match_type, payload)
-       values ($1,$2,$3,$4,$5,'created',$6::jsonb)`,
-      [source, item.sourceId, id, hash, item.url, JSON.stringify(item.payload)],
+      `insert into event_links (source, source_id, event_id, hash, url, match_type, payload, authoritative)
+       values ($1,$2,$3,$4,$5,'created',$6::jsonb,$7)`,
+      [source, item.sourceId, id, hash, item.url, JSON.stringify(item.payload), auth],
     ));
     const review = reviewPair.get(i);
     if (review) {
@@ -239,11 +294,14 @@ export async function applySource(source: string, result: SourceResult, dedupe =
       if (seen.has(sourceId)) continue;
       const day = String(link.day);
       if (day < result.windowStart || day > result.windowEnd) continue;
-      if (link.match_type === "created" && !link.locally_modified && !link.deleted_at) {
+      const eventId = String(link.event_id);
+      if (link.match_type === "created" && !link.locally_modified && !link.deleted_at && !superseded.has(eventId)) {
         writes.push(sql.query(
           `update events set deleted_at = now(), updated_at = now(), extra = extra || '{"removedBySource": true}'::jsonb where id = $1`,
-          [link.event_id],
+          [eventId],
         ));
+      } else if (link.authoritative && link.match_type !== "created" && !link.deleted_at) {
+        writes.push(sql.query(RESTORE_FROM_ORIGIN, [eventId, source]));
       }
       writes.push(sql.query("delete from event_links where source=$1 and source_id=$2", [source, sourceId]));
       stats.removed++;

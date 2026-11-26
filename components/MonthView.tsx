@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
-  addDays, daysInMonth, diffDays, eventDays, fmtTimeCompact, isMultiDay, isoWeek, MONTHS, startOfWeek, weekdayIndex,
+  addDays, addMonths, daysInMonth, diffDays, eventDays, fmtTimeCompact, isMultiDay, isoWeek, MONTHS, startOfWeek, weekdayIndex,
   WEEKDAYS_SHORT,
 } from "@/lib/date";
 import { needsOutline, rgba, strong, textOn } from "@/lib/color";
@@ -15,7 +15,8 @@ type Props = {
   byDay: Map<string, CalEvent[]>;
   calById: Map<string, Calendar>;
   selected: string | null;
-  direction: number;
+  /** Wird beim Scrollen aufgerufen, sobald ein anderer Monat im Bild ist */
+  onMonthChange: (month: string) => void;
   onDayTap: (day: string) => void;
   onDayLongPress: (day: string) => void;
   onEventTap: (ev: CalEvent) => void;
@@ -40,52 +41,100 @@ export function chipStyle(ev: CalEvent, cal: Calendar | undefined, filled: boole
   };
 }
 
-export default function MonthView(props: Props) {
-  const { month, today, byDay, calById, selected, direction, onDayTap, onDayLongPress, onEventTap, onSwipe } = props;
-  const dark = useDark();
-  const gridRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 390, h: 600 });
+// Monate vor/nach dem Startmonat, durch die man senkrecht scrollen kann (wird bei Bedarf verschoben)
+const BEFORE = 24;
+const AFTER = 48;
+const COUNT = BEFORE + AFTER + 1;
 
+function monthDiff(a: string, b: string) {
+  return (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + Number(b.slice(5, 7)) - Number(a.slice(5, 7));
+}
+
+/**
+ * Monatsansicht mit senkrechtem Scrollen: jeder Monat füllt die Fläche und rastet ein
+ * (wie im iPhone-Kalender) – so geht es nahtlos ins nächste Jahr. Gerendert werden nur
+ * der sichtbare Monat und seine Nachbarn.
+ */
+export default function MonthView(props: Props) {
+  const { month, today, byDay, calById, selected, onMonthChange, onDayTap, onDayLongPress, onEventTap, onSwipe } = props;
+  const dark = useDark();
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [base, setBase] = useState(() => addMonths(month, -BEFORE));
+  const [visible, setVisible] = useState(BEFORE);
+  const visibleRef = useRef(BEFORE);
+  const ready = useRef(false);
+  const programmatic = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Größe messen (sofort beim ersten Rendern + bei Änderungen); danach den Monat bündig ausrichten
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (el && el.clientHeight) setSize({ w: el.clientWidth, h: el.clientHeight });
+  }, []);
   useEffect(() => {
-    const el = gridRef.current;
+    const el = scrollerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      const r = entry.contentRect;
-      setSize({ w: r.width, h: r.height });
+      const { width, height } = entry.contentRect;
+      setSize((s) => (s.w === width && s.h === height ? s : { w: width, h: height }));
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  const wide = size.w >= 680;
-  const TOP = wide ? 26 : 19;
-  const STEP = wide ? 20 : 16;
-  const CHIP = wide ? 18 : 15;
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (el && size.h && ready.current) el.scrollTop = visibleRef.current * size.h;
+  }, [size.h]);
 
-  const weeks = useMemo(() => {
-    const gridStart = startOfWeek(month);
-    const last = addDays(month, daysInMonth(month) - 1);
-    const n = Math.ceil((diffDays(gridStart, last) + 1) / 7);
-    return Array.from({ length: n }, (_, i) => addDays(gridStart, i * 7));
-  }, [month]);
+  // Monat von außen geändert (Heute, Pfeile, Wischen, Jahresansicht) → dorthin scrollen
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !size.h) return;
+    const idx = monthDiff(base, month);
+    if (idx < 2 || idx > COUNT - 3) {
+      // Ende des Bereichs erreicht → Bereich um den Monat neu aufspannen
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Scrollbereich bewusst neu aufspannen
+      setBase(addMonths(month, -BEFORE));
+      ready.current = false;
+      return;
+    }
+    if (ready.current && idx === visibleRef.current) return;
+    const smooth = ready.current && Math.abs(idx - visibleRef.current) <= 2;
+    if (programmatic.current) clearTimeout(programmatic.current);
+    programmatic.current = setTimeout(() => { programmatic.current = null; }, smooth ? 650 : 80);
+    visibleRef.current = idx;
+    setVisible(idx);
+    el.scrollTo({ top: idx * size.h, behavior: smooth ? "smooth" : "instant" });
+    ready.current = true;
+  }, [month, base, size.h]);
 
-  const rowH = size.h / weeks.length;
-  const maxSlots = Math.max(1, Math.floor((rowH - TOP - 1) / STEP));
+  const onScroll = () => {
+    const el = scrollerRef.current;
+    if (!el || !size.h || !ready.current) return;
+    const idx = Math.max(0, Math.min(COUNT - 1, Math.round(el.scrollTop / size.h)));
+    if (idx === visibleRef.current) return;
+    visibleRef.current = idx;
+    setVisible(idx);
+    if (!programmatic.current) onMonthChange(addMonths(base, idx));
+  };
 
-  // ---- Wischen & langes Drücken
-  const touch = useRef<{ x: number; y: number; t: number; long: boolean; timer?: ReturnType<typeof setTimeout> } | null>(null);
+  // ---- Wischen (links/rechts) & langes Drücken
+  const touch = useRef<{ x: number; y: number; long: boolean; timer?: ReturnType<typeof setTimeout> } | null>(null);
   const suppressClick = useRef(false);
-  const startPress = (x: number, y: number, day: string) => {
+  const startPress = (x: number, y: number, day: string | undefined) => {
     if (touch.current?.timer) clearTimeout(touch.current.timer);
     touch.current = {
-      x, y, t: Date.now(), long: false,
-      timer: setTimeout(() => {
-        if (!touch.current) return;
-        touch.current.long = true;
-        suppressClick.current = true;
-        navigator.vibrate?.(12);
-        onDayLongPress(day);
-      }, 480),
+      x, y, long: false,
+      timer: day
+        ? setTimeout(() => {
+            if (!touch.current) return;
+            touch.current.long = true;
+            suppressClick.current = true;
+            navigator.vibrate?.(12);
+            onDayLongPress(day);
+          }, 480)
+        : undefined,
     };
   };
   const movePress = (x: number, y: number) => {
@@ -100,13 +149,12 @@ export default function MonthView(props: Props) {
     clearTimeout(t.timer);
     const dx = x - t.x;
     const dy = y - t.y;
-    if (!t.long && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+    if (Math.abs(dy) > 10) suppressClick.current = false;
+    if (!t.long && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.6) {
       suppressClick.current = true;
       onSwipe(dx < 0 ? 1 : -1);
     }
   };
-
-  const monthIdx = Number(month.slice(5, 7));
 
   return (
     <div className="month-panel glass">
@@ -116,50 +164,105 @@ export default function MonthView(props: Props) {
         ))}
       </div>
       <div
-        ref={gridRef}
-        style={{ flex: 1, minHeight: 0, position: "relative", touchAction: "pan-y" }}
+        ref={scrollerRef}
+        className="month-scroller"
+        onScroll={onScroll}
         onTouchStart={(e) => {
           const cell = (e.target as HTMLElement).closest<HTMLElement>("[data-day]");
-          startPress(e.touches[0].clientX, e.touches[0].clientY, cell?.dataset.day ?? month);
+          startPress(e.touches[0].clientX, e.touches[0].clientY, cell?.dataset.day);
         }}
         onTouchMove={(e) => movePress(e.touches[0].clientX, e.touches[0].clientY)}
         onTouchEnd={(e) => endPress(e.changedTouches[0].clientX, e.changedTouches[0].clientY)}
         onTouchCancel={() => { if (touch.current?.timer) clearTimeout(touch.current.timer); touch.current = null; }}
       >
-        <div
-          key={month}
-          className={`month-grid ${direction > 0 ? "slide-l" : direction < 0 ? "slide-r" : "fade-in"}`}
-          style={{ gridTemplateRows: `repeat(${weeks.length}, 1fr)`, height: "100%" }}
-        >
-          {weeks.map((ws) => (
-            <Week
-              key={ws}
-              ws={ws}
-              monthIdx={monthIdx}
-              today={today}
-              selected={selected}
-              byDay={byDay}
-              calById={calById}
-              maxSlots={maxSlots}
-              TOP={TOP}
-              STEP={STEP}
-              CHIP={CHIP}
-              wide={wide}
-              dark={dark}
-              onDayClick={(day) => {
-                if (suppressClick.current) { suppressClick.current = false; return; }
-                onDayTap(day);
-              }}
-              onEventTap={onEventTap}
-              onContextMenu={(day) => onDayLongPress(day)}
-            />
-          ))}
-        </div>
+        {Array.from({ length: COUNT }, (_, i) => {
+          const m = addMonths(base, i);
+          const near = Math.abs(i - visible) <= 1;
+          return (
+            <div key={m} className="month-page" style={{ height: size.h || "100%" }}>
+              {near && size.h > 0 ? (
+                <MonthGrid
+                  month={m}
+                  size={size}
+                  today={today}
+                  selected={selected}
+                  byDay={byDay}
+                  calById={calById}
+                  dark={dark}
+                  onDayClick={(day) => {
+                    if (suppressClick.current) { suppressClick.current = false; return; }
+                    onDayTap(day);
+                  }}
+                  onEventTap={onEventTap}
+                  onContextMenu={onDayLongPress}
+                />
+              ) : (
+                <div className="month-ph">{MONTHS[Number(m.slice(5, 7)) - 1]} {m.slice(0, 4)}</div>
+              )}
+            </div>
+          );
+        })}
       </div>
-      <span className="sr-only">{MONTHS[monthIdx - 1]}</span>
     </div>
   );
 }
+
+type GridProps = {
+  month: string;
+  size: { w: number; h: number };
+  today: string;
+  selected: string | null;
+  byDay: Map<string, CalEvent[]>;
+  calById: Map<string, Calendar>;
+  dark: boolean;
+  onDayClick: (day: string) => void;
+  onEventTap: (ev: CalEvent) => void;
+  onContextMenu: (day: string) => void;
+};
+
+function MonthGrid({ month, size, today, selected, byDay, calById, dark, onDayClick, onEventTap, onContextMenu }: GridProps) {
+  const wide = size.w >= 680;
+  const TOP = wide ? 26 : 19;
+  const STEP = wide ? 20 : 16;
+  const CHIP = wide ? 18 : 15;
+
+  const weeks = useMemo(() => {
+    const gridStart = startOfWeek(month);
+    const last = addDays(month, daysInMonth(month) - 1);
+    const n = Math.ceil((diffDays(gridStart, last) + 1) / 7);
+    return Array.from({ length: n }, (_, i) => addDays(gridStart, i * 7));
+  }, [month]);
+
+  const rowH = size.h / weeks.length;
+  const maxSlots = Math.max(1, Math.floor((rowH - TOP - 1) / STEP));
+  const monthIdx = Number(month.slice(5, 7));
+
+  return (
+    <div className="month-grid" style={{ gridTemplateRows: `repeat(${weeks.length}, 1fr)`, height: "100%" }}>
+      {weeks.map((ws) => (
+        <Week
+          key={ws}
+          ws={ws}
+          monthIdx={monthIdx}
+          today={today}
+          selected={selected}
+          byDay={byDay}
+          calById={calById}
+          maxSlots={maxSlots}
+          TOP={TOP}
+          STEP={STEP}
+          CHIP={CHIP}
+          wide={wide}
+          dark={dark}
+          onDayClick={onDayClick}
+          onEventTap={onEventTap}
+          onContextMenu={onContextMenu}
+        />
+      ))}
+    </div>
+  );
+}
+
 
 type WeekProps = {
   ws: string;

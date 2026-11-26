@@ -120,6 +120,8 @@ export async function fetchDigitalMask(): Promise<SourceResult> {
       allDay,
       status: "confirmed" as const,
       kind: leaveId || free ? ("leave" as const) : ("theater" as const),
+      // Theaterdienste: DigitalMask hat die korrekten Zeiten und gewinnt gegenüber Kalender.digital
+      authoritative: !leaveId && !free,
       names: [production, own].filter(Boolean),
       calendar: free ? THEATER_FREE : THEATER,
     };

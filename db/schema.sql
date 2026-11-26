@@ -93,3 +93,4 @@ create table if not exists login_attempts (
   at  timestamptz not null default now()
 );
 create index if not exists login_attempts_ip_idx on login_attempts (ip, at desc);
+alter table event_links add column if not exists authoritative boolean not null default false;

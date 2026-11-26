@@ -235,6 +235,7 @@ export async function fetchWebsite(): Promise<SourceResult> {
       const location = String(b.venue ?? b.service_location ?? "");
       push({
         sourceId: `brides:${id}:${d.kind}`,
+        authoritative: true,
         title,
         notes: [plan.text ? `Zeitplan:\n${plan.text}` : "", notes].filter(Boolean).join("\n\n"),
         who: name,
@@ -261,6 +262,7 @@ export async function fetchWebsite(): Promise<SourceResult> {
       const title = `Probetermin ${name}`.trim();
       push({
         sourceId: `brides:${id}:probe`,
+        authoritative: true,
         title,
         notes: "",
         who: name,
@@ -324,6 +326,7 @@ export async function fetchWebsite(): Promise<SourceResult> {
     const title = String(e.title || cat || "Termin");
     push({
       sourceId: `lena_calendar_events:${e.id}`,
+      authoritative: true,
       title, notes: String(e.note ?? ""), who: customer, location: String(e.location ?? ""),
       start, end, allDay: false, status: "confirmed", kind, names: [customer].filter(Boolean),
       calendar, url: `${SITE}/lena/brides?view=kalender`,
@@ -339,6 +342,7 @@ export async function fetchWebsite(): Promise<SourceResult> {
     const title = `${String(a.program_title ?? "Academy")} – ${String(a.full_name ?? "")}`.trim();
     push({
       sourceId: `academy_bookings:${a.id}`,
+      authoritative: true,
       title, notes: String(a.note ?? ""), who: String(a.full_name ?? ""), location: String(a.location ?? ""),
       start, end, allDay: false, status: status === "requested" ? "tentative" : "confirmed",
       kind: "course", names: [String(a.full_name ?? "")], calendar: CAL.academy,

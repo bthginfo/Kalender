@@ -133,7 +133,7 @@ export default function EventSheet({ ev, cal, today, dark, onEdit, onDuplicate, 
           <div className="section-title">Infos aus den Quellen</div>
           {ev.sources.map((s) => {
             const p = s.payload ?? {};
-            const differentTime = p.start && (p.start !== ev.start || (p.end && p.end !== ev.end)) && s.source !== "kalenderdigital";
+            const differentTime = p.start && (p.start !== ev.start || (p.end && p.end !== ev.end));
             return (
               <div key={`${s.source}:${s.sourceId}`} className="group" style={{ marginBottom: 10 }}>
                 <div className="row" style={{ minHeight: 44 }}>

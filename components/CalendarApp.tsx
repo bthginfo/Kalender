@@ -28,7 +28,9 @@ export default function CalendarApp() {
   const [today, setToday] = useState(() => todayBerlin());
   const [view, setView] = useState<View>("month");
   const [month, setMonth] = useState(() => startOfMonth(todayBerlin()));
-  const [direction, setDirection] = useState(0);
+  // Jahresansicht: Jahr, zu dem gescrollt wird, und das gerade sichtbare Jahr
+  const [yearFocus, setYearFocus] = useState(() => ({ year: Number(todayBerlin().slice(0, 4)), nonce: 0 }));
+  const [yearInView, setYearInView] = useState(() => Number(todayBerlin().slice(0, 4)));
   const [day, setDay] = useState<string | null>(null);
   const [openEvent, setOpenEvent] = useState<CalEvent | null>(null);
   const [editor, setEditor] = useState<EditorInit | null>(null);
@@ -59,16 +61,24 @@ export default function CalendarApp() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  const showYear = useCallback(() => {
+    const y = Number(month.slice(0, 4));
+    setYearFocus((f) => ({ year: y, nonce: f.nonce + 1 }));
+    setYearInView(y);
+    setView("year");
+  }, [month]);
   const go = useCallback((delta: number) => {
-    setDirection(delta);
-    setMonth((m) => addMonths(m, view === "year" ? delta * 12 : delta));
-  }, [view]);
+    if (view === "year") setYearFocus((f) => ({ year: yearInView + delta, nonce: f.nonce + 1 }));
+    else setMonth((m) => addMonths(m, delta));
+  }, [view, yearInView]);
   const goToday = useCallback(() => {
-    const target = startOfMonth(today);
-    setDirection(target > month ? 1 : target < month ? -1 : 0);
-    setMonth(target);
+    if (view === "year") {
+      setYearFocus((f) => ({ year: Number(today.slice(0, 4)), nonce: f.nonce + 1 }));
+      return;
+    }
+    setMonth(startOfMonth(today));
     if (view === "month") setDay(null);
-  }, [today, month, view]);
+  }, [today, view]);
 
   // Aktuelles Event frisch halten (nach Sync/Änderungen)
   const liveOpenEvent = useMemo(() => {
@@ -88,11 +98,11 @@ export default function CalendarApp() {
       else if (e.key === "/" || e.key === "f") { e.preventDefault(); setPanel("search"); }
       else if (e.key === "m") setView("month");
       else if (e.key === "l") setView("agenda");
-      else if (e.key === "j") setView("year");
+      else if (e.key === "j") showYear();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [go, goToday, day, today]);
+  }, [go, goToday, showYear, day, today]);
 
   const saveEvent = async (input: EventInput, id?: string) => {
     if (id) {
@@ -104,7 +114,7 @@ export default function CalendarApp() {
       setToast({ text: `„${ev.title}“ eingetragen`, action: { label: "Ansehen", run: () => setOpenEvent(ev) } });
       if (view === "month") {
         const target = startOfMonth(ev.start.slice(0, 10));
-        if (target !== month) { setDirection(target > month ? 1 : -1); setMonth(target); }
+        if (target !== month) setMonth(target);
       }
     }
     setEditor(null);
@@ -131,7 +141,7 @@ export default function CalendarApp() {
 
   const monthIdx = Number(month.slice(5, 7)) - 1;
   const year = Number(month.slice(0, 4));
-  const isCurrentMonth = startOfMonth(today) === month;
+  const isCurrentMonth = view === "year" ? yearInView === Number(today.slice(0, 4)) : startOfMonth(today) === month;
   const openDuplicates = data.data?.openDuplicates ?? 0;
   const dayEvents = day ? data.byDay.get(day) ?? [] : [];
 
@@ -139,12 +149,12 @@ export default function CalendarApp() {
     <header className="topbar">
       <button
         className="press"
-        onClick={() => setView(view === "year" ? "month" : "year")}
+        onClick={() => (view === "year" ? setView("month") : showYear())}
         style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", minWidth: 0 }}
         aria-label="Jahresübersicht"
       >
         <div className="month-title">
-          {view === "year" ? year : view === "agenda" ? "Termine" : MONTHS[monthIdx]}
+          {view === "year" ? yearInView : view === "agenda" ? "Termine" : MONTHS[monthIdx]}
           {view === "month" && <small>{year}</small>}
           {data.offline && <span className="badge" style={{ marginLeft: 8, verticalAlign: "middle" }}>offline</span>}
         </div>
@@ -192,7 +202,7 @@ export default function CalendarApp() {
           byDay={data.byDay}
           calById={data.calById}
           selected={day}
-          direction={direction}
+          onMonthChange={setMonth}
           onDayTap={(d) => setDay(d)}
           onDayLongPress={(d) => setEditor({ day: d })}
           onEventTap={(ev) => setOpenEvent(ev)}
@@ -202,11 +212,12 @@ export default function CalendarApp() {
         <AgendaView today={today} events={data.visibleEvents} calById={data.calById} dark={dark} onEventTap={setOpenEvent} onAdd={(d) => setEditor({ day: d })} />
       ) : (
         <YearView
-          year={year}
+          focus={yearFocus}
           today={today}
           byDay={data.byDay}
           calById={data.calById}
-          onPickMonth={(m) => { setDirection(0); setMonth(m); setView("month"); }}
+          onPickMonth={(m) => { setMonth(m); setView("month"); }}
+          onVisibleYear={setYearInView}
         />
       )}
 
@@ -214,7 +225,7 @@ export default function CalendarApp() {
         <div className="tabbar glass" role="tablist">
           <button className="tab" role="tab" aria-label="Monat" aria-selected={view === "month"} onClick={() => setView("month")}><IconMonth /><span>Monat</span></button>
           <button className="tab" role="tab" aria-label="Liste" aria-selected={view === "agenda"} onClick={() => setView("agenda")}><IconList /><span>Liste</span></button>
-          <button className="tab" role="tab" aria-label="Jahr" aria-selected={view === "year"} onClick={() => setView("year")}><IconYear /><span>Jahr</span></button>
+          <button className="tab" role="tab" aria-label="Jahr" aria-selected={view === "year"} onClick={showYear}><IconYear /><span>Jahr</span></button>
         </div>
         <button className="fab" aria-label="Neuer Termin" onClick={() => setEditor({ day: day ?? (isCurrentMonth || view !== "month" ? today : month) })}>
           <IconPlus />
@@ -231,7 +242,7 @@ export default function CalendarApp() {
           onChangeDay={(d) => {
             setDay(d);
             const m = startOfMonth(d);
-            if (m !== month) { setDirection(m > month ? 1 : -1); setMonth(m); }
+            if (m !== month) setMonth(m);
           }}
           onEventTap={setOpenEvent}
           onAdd={(d) => setEditor({ day: d })}
