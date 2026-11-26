@@ -13,6 +13,11 @@ const THEATER = { name: "Theater", color: "#8064A2" };
 // Freie Tage (Ruhetag, Feiertag, Urlaub …) in einen eigenen, helleren Kalender, damit sie die Ansicht nicht dominieren
 const THEATER_FREE = { name: "Theater · frei", color: "#C9B8E3" };
 const FREE_NAMES = /^(ruhetag|feiertag|urlaub|hft|abf|absent|frei|freier tag|halber freier tag)$/i;
+// Diese Kategorien will Lena nicht im Kalender (überschreibbar per Env, kommagetrennt).
+// Bereits importierte Einträge entfernt der nächste Abgleich automatisch.
+const SKIP_CATEGORIES = new Set(
+  (process.env.DIGITALMASK_SKIP_CATEGORIES ?? "Ruhetag,ABF,HFT").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+);
 
 type Row = Record<string, unknown>;
 
@@ -86,6 +91,7 @@ export async function fetchDigitalMask(): Promise<SourceResult> {
   for (const r of events) {
     const id = String(r.id);
     const category = String(r.category_name ?? "Termin");
+    if (SKIP_CATEGORIES.has(category.trim().toLowerCase())) continue;
     // Kategorie-Schlüssel wurden in DigitalMask teils umbenannt (z. B. absence = "HP2") → nach Namen entscheiden
     const free = FREE_NAMES.test(category.trim());
     const production = r.production_title ? String(r.production_title) : "";
