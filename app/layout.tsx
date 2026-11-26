@@ -1,12 +1,14 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import ServiceWorker from "@/components/ServiceWorker";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "Kalender",
   description: "Lenas Kalender – Hochzeiten, Probetermine, Theater & Privates an einem Ort",
   applicationName: "Kalender",
-  appleWebApp: { capable: true, title: "Kalender", statusBarStyle: "black-translucent" },
+  // "default": Statusleiste übernimmt die theme-color → dunkle Schrift bei Hell, helle bei Dunkel
+  appleWebApp: { capable: true, title: "Kalender", statusBarStyle: "default" },
   formatDetection: { telephone: false, email: false, address: false },
   icons: {
     icon: [
@@ -31,8 +33,9 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="de">
+    <html lang="de" suppressHydrationWarning>
       <body>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
         <div className="backdrop" aria-hidden="true">
           <i /><i /><i /><i />
         </div>

@@ -8,7 +8,7 @@ const CalendarApp = dynamic(() => import("./CalendarApp"), {
   ssr: false,
   loading: () => (
     <div className="app-shell">
-      <div className="topbar" style={{ height: 64 }} />
+      <div className="topbar" style={{ height: 41 }} />
       <div className="month-panel glass" style={{ display: "grid", placeItems: "center" }}>
         <span className="spinner" />
       </div>

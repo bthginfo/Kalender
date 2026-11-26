@@ -58,9 +58,9 @@ export default function MonthView(props: Props) {
   }, []);
 
   const wide = size.w >= 680;
-  const TOP = wide ? 32 : 27;
-  const STEP = wide ? 21 : 18;
-  const CHIP = wide ? 19 : 16;
+  const TOP = wide ? 26 : 19;
+  const STEP = wide ? 20 : 16;
+  const CHIP = wide ? 18 : 15;
 
   const weeks = useMemo(() => {
     const gridStart = startOfWeek(month);
@@ -70,7 +70,7 @@ export default function MonthView(props: Props) {
   }, [month]);
 
   const rowH = size.h / weeks.length;
-  const maxSlots = Math.max(1, Math.floor((rowH - TOP - 2) / STEP));
+  const maxSlots = Math.max(1, Math.floor((rowH - TOP - 1) / STEP));
 
   // ---- Wischen & langes Drücken
   const touch = useRef<{ x: number; y: number; t: number; long: boolean; timer?: ReturnType<typeof setTimeout> } | null>(null);

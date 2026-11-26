@@ -88,7 +88,7 @@ export async function fetchKalenderDigital(full = false): Promise<SourceResult> 
     items.push({
       // Serientermine hätten dieselbe id → Startzeit anhängen
       sourceId: (idCount.get(e.id) ?? 0) > 1 ? `${e.id}@${start}` : e.id,
-      title: e.title?.trim() || "(ohne Titel)",
+      title: e.title?.trim() || e.who?.trim() || sub.name,
       notes: e.text ?? "",
       who: e.who ?? "",
       location: e.where ?? "",

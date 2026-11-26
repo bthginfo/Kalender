@@ -7,6 +7,8 @@ import Sheet from "./Sheet";
 import { api } from "./useData";
 import { SOURCE_LABEL } from "./EventCard";
 import { IconCheck, IconCopy, IconMerge, IconSync } from "./icons";
+import { useThemePref } from "./useDark";
+import { setThemePref } from "@/lib/theme";
 
 type Props = {
   calById: Map<string, Calendar>;
@@ -46,6 +48,7 @@ export default function SettingsSheet({ calById, openDuplicates, onChanged, onEv
   const [icsUrl, setIcsUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const theme = useThemePref();
 
   const loadStatus = useCallback(async () => setStatus(await api<SyncSourceStatus[]>("/api/sync")), []);
   const loadDups = useCallback(async () => setDups(await api<DuplicatePair[]>("/api/duplicates")), []);
@@ -89,7 +92,22 @@ export default function SettingsSheet({ calById, openDuplicates, onChanged, onEv
 
   return (
     <Sheet onClose={onClose} title="Einstellungen">
-      <div className="section-title" style={{ marginTop: 6 }}>Automatischer Abgleich</div>
+      <div className="section-title" style={{ marginTop: 6 }}>Darstellung</div>
+      <div className="group">
+        <div className="row">
+          <div className="seg" style={{ flex: 1 }}>
+            {([["system", "Automatisch"], ["light", "Hell"], ["dark", "Dunkel"]] as const).map(([k, l]) => (
+              <button key={k} type="button" aria-pressed={theme === k} onClick={() => setThemePref(k)}>{l}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <p className="tiny" style={{ margin: "8px 6px 0", lineHeight: 1.45 }}>
+        „Automatisch“ folgt dem iPhone: Ist dort unter Einstellungen → Anzeige &amp; Helligkeit „Automatisch“ aktiv, wird der
+        Kalender abends dunkel und morgens wieder hell.
+      </p>
+
+      <div className="section-title">Automatischer Abgleich</div>
       <div className="group">
         {(status ?? []).map((s) => (
           <div className="row" key={s.source} style={{ alignItems: "flex-start" }}>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { addMonths, MONTHS, startOfMonth, todayBerlin } from "@/lib/date";
 import type { CalEvent, EventInput, SourceRef } from "@/lib/types";
 import { useData, api } from "./useData";
+import { applyTheme, getThemePref } from "@/lib/theme";
 import { useDark } from "./useDark";
 import MonthView from "./MonthView";
 import AgendaView from "./AgendaView";
@@ -39,6 +40,8 @@ export default function CalendarApp() {
     const v = localStorage.getItem("mk_view") as View | null;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- gespeicherte Ansicht wiederherstellen
     if (v === "month" || v === "agenda" || v === "year") setView(v);
+    // Darstellung auch auf nachträglich eingefügte theme-color-Tags anwenden
+    applyTheme(getThemePref());
     // App-Shortcuts aus dem Manifest (?new=1, ?view=agenda)
     const params = new URLSearchParams(location.search);
     const pv = params.get("view");
@@ -140,11 +143,11 @@ export default function CalendarApp() {
         style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", minWidth: 0 }}
         aria-label="Jahresübersicht"
       >
-        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--accent)", letterSpacing: "0.01em", marginBottom: 3 }}>
-          {view === "year" ? "Jahresübersicht" : view === "agenda" ? "Alle Termine" : year}
-          {data.offline && <span className="badge" style={{ marginLeft: 8 }}>offline</span>}
+        <div className="month-title">
+          {view === "year" ? year : view === "agenda" ? "Termine" : MONTHS[monthIdx]}
+          {view === "month" && <small>{year}</small>}
+          {data.offline && <span className="badge" style={{ marginLeft: 8, verticalAlign: "middle" }}>offline</span>}
         </div>
-        <div className="month-title">{view === "year" ? year : view === "agenda" ? "Termine" : MONTHS[monthIdx]}</div>
       </button>
       <div style={{ flex: 1 }} />
       <div className="glass pill" style={{ display: "flex", padding: 3, gap: 1 }}>
@@ -167,7 +170,7 @@ export default function CalendarApp() {
         <button className="icon-btn" aria-label="Einstellungen" onClick={() => setPanel("settings")} style={{ background: "transparent", position: "relative" }}>
           <IconGear />
           {openDuplicates > 0 && (
-            <span style={{ position: "absolute", top: 5, right: 5, minWidth: 16, height: 16, borderRadius: 99, background: "var(--accent)", color: "var(--accent-ink)", fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center", padding: "0 4px" }}>
+            <span style={{ position: "absolute", top: 1, right: 1, minWidth: 15, height: 15, borderRadius: 99, background: "var(--accent)", color: "var(--accent-ink)", fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center", padding: "0 4px" }}>
               {openDuplicates}
             </span>
           )}
@@ -209,9 +212,9 @@ export default function CalendarApp() {
 
       <nav className="tabbar-wrap">
         <div className="tabbar glass" role="tablist">
-          <button className="tab" role="tab" aria-selected={view === "month"} onClick={() => setView("month")}><IconMonth />Monat</button>
-          <button className="tab" role="tab" aria-selected={view === "agenda"} onClick={() => setView("agenda")}><IconList />Liste</button>
-          <button className="tab" role="tab" aria-selected={view === "year"} onClick={() => setView("year")}><IconYear />Jahr</button>
+          <button className="tab" role="tab" aria-label="Monat" aria-selected={view === "month"} onClick={() => setView("month")}><IconMonth /><span>Monat</span></button>
+          <button className="tab" role="tab" aria-label="Liste" aria-selected={view === "agenda"} onClick={() => setView("agenda")}><IconList /><span>Liste</span></button>
+          <button className="tab" role="tab" aria-label="Jahr" aria-selected={view === "year"} onClick={() => setView("year")}><IconYear /><span>Jahr</span></button>
         </div>
         <button className="fab" aria-label="Neuer Termin" onClick={() => setEditor({ day: day ?? (isCurrentMonth || view !== "month" ? today : month) })}>
           <IconPlus />

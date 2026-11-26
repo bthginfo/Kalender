@@ -44,8 +44,39 @@
   color-scheme: light;
 }
 
+/* Dunkel: manuell gewählt (data-theme="dark") oder automatisch nach iPhone-Einstellung */
+:root[data-theme="dark"] {
+  --bg: #0e0b10;
+  --ink: #f6eef0;
+  --ink-2: rgba(246, 238, 240, 0.7);
+  --ink-3: rgba(246, 238, 240, 0.42);
+  --hair: rgba(255, 255, 255, 0.08);
+  --hair-strong: rgba(255, 255, 255, 0.14);
+  --accent: #f0937a;
+  --accent-ink: #2b120c;
+  --accent-soft: rgba(240, 147, 122, 0.16);
+  --danger: #ff6b6b;
+
+  --glass-bg: linear-gradient(160deg, rgba(58, 50, 62, 0.55), rgba(28, 24, 32, 0.42));
+  --glass-solid: rgba(30, 26, 34, 0.84);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-hi: rgba(255, 255, 255, 0.22);
+  --glass-lo: rgba(255, 255, 255, 0.04);
+  --glass-shadow: 0 14px 44px -12px rgba(0, 0, 0, 0.7), 0 2px 10px -2px rgba(0, 0, 0, 0.4);
+  --cell-bg: rgba(255, 255, 255, 0.035);
+  --cell-weekend: rgba(255, 255, 255, 0.055);
+  --cell-out: rgba(255, 255, 255, 0.01);
+  --sheet-bg: linear-gradient(180deg, rgba(40, 34, 44, 0.86), rgba(24, 20, 28, 0.86));
+  --scrim: rgba(0, 0, 0, 0.45);
+
+  --blob-1: #6b2f3c;
+  --blob-2: #3a2c66;
+  --blob-3: #1f3d5c;
+  --blob-4: #5a3a22;
+  color-scheme: dark;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0e0b10;
     --ink: #f6eef0;
     --ink-2: rgba(246, 238, 240, 0.7);
@@ -160,48 +191,56 @@ input, textarea, select { font: inherit; color: inherit; }
 .btn-danger { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
 
 /* ───────────────────────── Kopf & Leisten ───────────────────────── */
+/* Platz für die schwebende Leiste unten (Home-Indikator + Leiste + Luft) */
+:root { --bottom-gap: max(var(--safe-b), 8px); --bar-h: 44px; --bottom-space: calc(var(--bottom-gap) + var(--bar-h) + 8px); }
+
 .app-shell {
   position: relative; z-index: 1;
   height: 100dvh; display: flex; flex-direction: column;
-  padding: calc(var(--safe-t) + 8px) calc(var(--safe-r) + 10px) 0 calc(var(--safe-l) + 10px);
+  padding: calc(var(--safe-t) + 4px) calc(var(--safe-r) + 5px) 0 calc(var(--safe-l) + 5px);
 }
-.topbar { display: flex; align-items: center; gap: 10px; padding: 2px 4px 8px; }
-.month-title { font-size: 30px; font-weight: 750; letter-spacing: -0.03em; line-height: 1; }
-.month-title small { font-weight: 450; color: var(--ink-3); margin-left: 6px; letter-spacing: -0.02em; }
+.topbar { display: flex; align-items: center; gap: 8px; padding: 0 4px 5px 8px; min-height: 40px; }
+.month-title { font-size: 24px; font-weight: 760; letter-spacing: -0.03em; line-height: 1; white-space: nowrap; }
+.month-title small { font-size: 0.78em; font-weight: 500; color: var(--ink-3); margin-left: 6px; letter-spacing: -0.02em; }
+.topbar .icon-btn { width: 36px; height: 36px; }
+.topbar .icon-btn svg { width: 19px; height: 19px; }
 
 .tabbar-wrap {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; pointer-events: none;
-  display: flex; justify-content: center; align-items: flex-end; gap: 10px;
-  padding: 0 calc(var(--safe-r) + 14px) calc(var(--safe-b) + 12px) calc(var(--safe-l) + 14px);
+  display: flex; justify-content: center; align-items: center; gap: 8px;
+  padding: 0 calc(var(--safe-r) + 12px) var(--bottom-gap) calc(var(--safe-l) + 12px);
 }
-.tabbar { pointer-events: auto; display: flex; padding: 5px; gap: 2px; border-radius: 999px; }
+.tabbar { pointer-events: auto; display: flex; padding: 3px; gap: 2px; border-radius: 999px; height: var(--bar-h); }
 .tab {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  min-width: 70px; height: 54px; padding: 0 12px; border-radius: 999px; border: 0; background: transparent;
-  font-size: 10.5px; font-weight: 600; color: var(--ink-2);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  height: 100%; padding: 0 13px; border-radius: 999px; border: 0; background: transparent;
+  font-size: 13px; font-weight: 650; color: var(--ink-2);
   transition: background 0.25s, color 0.25s, transform 0.18s cubic-bezier(.3,1.6,.5,1);
 }
-.tab svg { width: 23px; height: 23px; }
-.tab[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); }
+.tab svg { width: 19px; height: 19px; flex-shrink: 0; }
+/* Nur der aktive Reiter zeigt seinen Namen – spart Platz wie bei iOS */
+.tab span { display: none; }
+.tab[aria-selected="true"] span { display: inline; }
+.tab[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); padding: 0 15px 0 13px; }
 .tab:active { transform: scale(0.93); }
 .fab {
-  pointer-events: auto; width: 64px; height: 64px; border-radius: 999px; border: 0; display: grid; place-items: center;
+  pointer-events: auto; width: var(--bar-h); height: var(--bar-h); border-radius: 999px; border: 0; display: grid; place-items: center;
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 80%, white), var(--accent));
   color: var(--accent-ink);
   box-shadow: 0 12px 30px -10px color-mix(in srgb, var(--accent) 80%, transparent), inset 0 1px 0 rgba(255,255,255,.45), inset 0 -2px 6px rgba(0,0,0,.08);
   transition: transform 0.2s cubic-bezier(.3,1.6,.5,1);
 }
 .fab:active { transform: scale(0.9) rotate(90deg); }
-.fab svg { width: 28px; height: 28px; }
+.fab svg { width: 22px; height: 22px; }
 
 /* ───────────────────────── Monatsansicht ───────────────────────── */
 .month-panel {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
-  border-radius: var(--r-xl); overflow: hidden;
-  margin-bottom: calc(var(--safe-b) + 84px);
+  border-radius: 22px; overflow: hidden;
+  margin-bottom: var(--bottom-space);
 }
-.weekdays { display: grid; grid-template-columns: repeat(7, 1fr); padding: 8px 2px 6px; }
-.weekdays span { text-align: center; font-size: 11px; font-weight: 650; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.weekdays { display: grid; grid-template-columns: repeat(7, 1fr); padding: 4px 0 3px; }
+.weekdays span { text-align: center; font-size: 10px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
 .weekdays span.we { color: color-mix(in srgb, var(--accent) 70%, var(--ink-3)); }
 .month-grid { flex: 1; min-height: 0; display: grid; position: relative; touch-action: pan-y; }
 .week-row { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); border-top: 0.5px solid var(--hair); min-height: 0; }
@@ -217,27 +256,31 @@ input, textarea, select { font: inherit; color: inherit; }
 .day-cell:active { background: var(--accent-soft); }
 .day-cell.selected { background: var(--accent-soft); }
 .day-num {
-  position: absolute; top: 4px; left: 4px; height: 20px; min-width: 20px; padding: 0 5px; border-radius: 999px;
-  display: grid; place-items: center; font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; z-index: 2;
+  position: absolute; top: 2px; left: 2px; height: 16px; min-width: 16px; padding: 0 4px; border-radius: 999px;
+  display: grid; place-items: center; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; z-index: 2;
 }
 .day-cell.today .day-num { background: var(--accent); color: var(--accent-ink); box-shadow: 0 3px 10px -3px var(--accent); }
-.kw { position: absolute; top: 6px; right: 5px; font-size: 9px; font-weight: 600; color: var(--ink-3); z-index: 2; }
+.kw { position: absolute; top: 3px; right: 3px; font-size: 8.5px; font-weight: 650; color: var(--ink-3); z-index: 2; }
 
 .chip {
-  position: absolute; height: 16px; line-height: 16px; border-radius: 5px; padding: 0 4px;
+  position: absolute; height: 15px; line-height: 15px; border-radius: 4px; padding: 0 3px;
   font-size: 10.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: clip;
-  z-index: 3; pointer-events: none; letter-spacing: -0.01em;
+  z-index: 3; pointer-events: none; letter-spacing: -0.015em;
 }
-.chip .t { font-weight: 750; margin-right: 3px; font-variant-numeric: tabular-nums; opacity: 0.85; }
-.chip.timed { border-left: 2.5px solid currentColor; border-radius: 3px 5px 5px 3px; padding-left: 3px; }
+.chip .t { font-weight: 750; margin-right: 2px; font-variant-numeric: tabular-nums; opacity: 0.85; }
+.chip.timed { border-left: 2px solid currentColor; border-radius: 2px 4px 4px 2px; padding-left: 2px; }
 .chip.tentative { background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgba(255,255,255,.35) 4px 7px) !important; }
 .chip.cancelled { text-decoration: line-through; opacity: 0.45; }
 .more { position: absolute; z-index: 3; font-size: 10px; font-weight: 700; color: var(--ink-2); pointer-events: none; padding-left: 4px; }
 
 @media (min-width: 700px) {
-  .chip { height: 19px; line-height: 19px; font-size: 12px; padding: 0 6px; }
-  .day-num { font-size: 13.5px; height: 24px; min-width: 24px; top: 5px; left: 6px; }
-  .month-title { font-size: 36px; }
+  .chip { height: 18px; line-height: 18px; font-size: 12px; padding: 0 5px; }
+  .day-num { font-size: 13px; height: 20px; min-width: 20px; top: 3px; left: 4px; }
+  .kw { font-size: 9.5px; top: 5px; right: 6px; }
+  .month-title { font-size: 30px; }
+  :root { --bar-h: 48px; }
+  .app-shell { padding-left: calc(var(--safe-l) + 12px); padding-right: calc(var(--safe-r) + 12px); padding-top: calc(var(--safe-t) + 10px); }
+  .tab span { display: inline; }
 }
 @media (min-width: 700px) and (pointer: fine) {
   .chip { pointer-events: auto; cursor: pointer; }
@@ -358,13 +401,13 @@ input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: n
 .agenda-day.is-today b { color: var(--accent); }
 
 .toast {
-  position: fixed; left: 50%; bottom: calc(var(--safe-b) + 92px); z-index: 60; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: calc(var(--bottom-space) + 6px); z-index: 60; transform: translateX(-50%);
   display: flex; align-items: center; gap: 14px; padding: 10px 10px 10px 18px; border-radius: 999px;
   font-size: 14.5px; font-weight: 600; animation: toast-in 0.34s cubic-bezier(.2,1.2,.3,1) both; max-width: calc(100vw - 28px); width: max-content; position: fixed;
 }
 .toast button { border: 0; border-radius: 99px; padding: 7px 14px; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 
-.scroll-area { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 4px calc(var(--safe-b) + 100px); }
+.scroll-area { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 4px calc(var(--bottom-space) + 16px); }
 
 .search-field {
   display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 999px; flex: 1;
